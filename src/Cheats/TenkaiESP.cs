@@ -25,7 +25,7 @@ public static class TenkaiESP
         // Fullbright is automatically activated when zooming out, spectating other players, or "freecamming"
         // This is done to avoid issues with shadows
 
-        return CheatToggles.noShadows || Camera.main.orthographicSize > 3f || Camera.main.gameObject.GetComponent<FollowerCamera>().Target != PlayerControl.LocalPlayer;
+        return CheatToggles.noShadows || (PlayerControl.LocalPlayer?.Data && PlayerControl.LocalPlayer.Data.IsDead) || Camera.main.orthographicSize > 3f || Camera.main.gameObject.GetComponent<FollowerCamera>().Target != PlayerControl.LocalPlayer;
     }
 
     public static void ZoomOut(HudManager hudManager)
@@ -34,7 +34,7 @@ public static class TenkaiESP
 
         if (CheatToggles.zoomOut)
         {
-            if (hudManager.Chat.IsOpenOrOpening || PlayerCustomizationMenu.Instance || (Utils.isLobby && (FriendsListUI.Instance.IsOpen ||
+            if (hudManager.Chat.IsOpenOrOpening || MatchInfoGuide.Instance.IsActive || PlayerCustomizationMenu.Instance || (Utils.isLobby && (FriendsListUI.Instance.IsOpen ||
                 GameStartManager.Instance.LobbyInfoPane.LobbyViewSettingsPane.gameObject.active || GameStartManager.Instance.RulesEditPanel))) return;
 
             _resolutionChangeNeeded = true;

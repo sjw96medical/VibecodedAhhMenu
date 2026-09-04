@@ -4,70 +4,21 @@ namespace TenkaiMenu;
 
 public class AnticheatTab : ITab
 {
-    public string name => "Anticheat";
-
+    public string name => "Anti-Cheat";
     public void Draw()
     {
         GUILayout.BeginVertical(GUILayout.Width(MenuUI.windowWidth * 0.425f));
-
-        GUILayout.Label("Anticheat", GUIStylePreset.TabSubtitle);
-
-        CheatToggles.anticheatEnabled = DrawPillToggle(CheatToggles.anticheatEnabled, "Enable Anticheat");
-        CheatToggles.anticheatDetectPlayerLevels = DrawPillToggle(CheatToggles.anticheatDetectPlayerLevels, "Detected player levels");
-        GUILayout.BeginHorizontal();
-        GUILayout.Label($"Detected level above: {CheatToggles.anticheatDetectPlayerLevelAbove}", GUILayout.Width(220));
-        float detectedLevelAboveSlider = GUILayout.HorizontalSlider(CheatToggles.anticheatDetectPlayerLevelAbove, 100f, 10000f, GUILayout.Width(140));
-        CheatToggles.anticheatDetectPlayerLevelAbove = Mathf.Clamp(Mathf.RoundToInt(detectedLevelAboveSlider), 100, 10000);
-        GUILayout.EndHorizontal();
-        CheatToggles.anticheatKickPlayerLevels = DrawPillToggle(CheatToggles.anticheatKickPlayerLevels, "Kick player levels");
-        GUILayout.BeginHorizontal();
-        GUILayout.Label($"Kick player level below: Lv{CheatToggles.anticheatKickPlayerLevelBelow}", GUILayout.Width(220));
-        float kickLevelBelowSlider = GUILayout.HorizontalSlider(CheatToggles.anticheatKickPlayerLevelBelow, 1f, 100f, GUILayout.Width(140));
-        CheatToggles.anticheatKickPlayerLevelBelow = Mathf.Clamp(Mathf.RoundToInt(kickLevelBelowSlider), 1, 100);
-        GUILayout.EndHorizontal();
-
-        CheatToggles.flagSpoofedPlatformData = DrawPillToggle(CheatToggles.flagSpoofedPlatformData, "Detect spoofed platform");
-
-        GUILayout.Space(10);
-        GUILayout.Label("Actions");
-        CheatToggles.anticheatSendNotification = DrawPillToggle(CheatToggles.anticheatSendNotification, "Send Notification");
-        CheatToggles.anticheatDiscardRpc = DrawPillToggle(CheatToggles.anticheatDiscardRpc, "Block RPC");
-
-        GUILayout.Space(10);
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("Punishment");
-        GUILayout.FlexibleSpace();
-
-        Color oldColor = GUI.backgroundColor;
-        GUI.backgroundColor = new Color(0.3f, 0.2f, 0.75f, 1f);
-
-        if (GUILayout.Button(((AnticheatGuard.PenaltyMode)CheatToggles.anticheatPunishment).ToString(), GUILayout.Width(120), GUILayout.Height(20)))
-        {
-            CheatToggles.anticheatPunishment = (CheatToggles.anticheatPunishment + 1) % 4;
-        }
-
-        GUI.backgroundColor = oldColor;
-        GUILayout.EndHorizontal();
-
+        GUILayout.Label("Anti-Cheat Control", GUIStylePreset.TabSubtitle); Toggle("Enable Anti-Cheat", ref Anticheat.IsEnabled);
+        GUILayout.Space(8); GUILayout.Label("Response", GUIStylePreset.TabSubtitle);
+        if (DrawGreenButton("Mode: " + Anticheat.DetectionResponseMode, GUILayout.Width(150f), GUILayout.Height(24))) Anticheat.DetectionResponseMode = (Anticheat.ResponseMode)(((int)Anticheat.DetectionResponseMode + 1) % 3);
+        GUILayout.Space(8); GUILayout.Label("Identity & Lists", GUIStylePreset.TabSubtitle); Toggle("Detect Invalid Friend Codes", ref Anticheat.DetectInvalidFriendCodes); Toggle("Use Player Ban List", ref Anticheat.UsePlayerBanList); Toggle("Use Name Ban List", ref Anticheat.UseNameBanList); Toggle("Use Word Ban List", ref Anticheat.UseWordBanList); Toggle("Lobby Only", ref Anticheat.BanWordsLobbyOnly);
+        GUILayout.Space(8); GUILayout.Label("Validation", GUIStylePreset.TabSubtitle); Toggle("Block Invalid Sabotages", ref Anticheat.BlockInvalidSabotages); Toggle("Hide Kick Reason", ref Anticheat.HideKickReason); Toggle("Detect Player Levels", ref Anticheat.DetectPlayerLevels); Slider("Max Level Threshold", ref Anticheat.MaxLevelThreshold, 100, 10000, "Lv"); Toggle("Auto Kick Levels", ref Anticheat.AutoKickLevels); Slider("Min Level Threshold", ref Anticheat.MinLevelThreshold, 0, 100, "Lv"); Toggle("Block RPCs", ref Anticheat.DetectInvalidRpcs); Toggle("Limit RPC Rate", ref Anticheat.LimitRpcRate); Step("Packet Rate Limit", ref Anticheat.PacketRateLimit, 25, 1000, 1, "PS");
         GUILayout.EndVertical();
     }
-
-    private bool DrawPillToggle(bool value, string text)
-    {
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(text);
-        GUILayout.FlexibleSpace();
-
-        Color oldColor = GUI.backgroundColor;
-        GUI.backgroundColor = value ? new Color(1f, 0f, 0.5f, 1f) : new Color(0f, 0.45f, 0.9f, 1f);
-
-        if (GUILayout.Button(value ? "ON" : "OFF", GUILayout.Width(55), GUILayout.Height(20)))
-        {
-            value = !value;
-        }
-
-        GUI.backgroundColor = oldColor;
-        GUILayout.EndHorizontal();
-        return value;
-    }
+    private static void Toggle(string text, ref bool value) { GUILayout.BeginHorizontal(); GUILayout.Label(text); GUILayout.FlexibleSpace(); value = DrawPillToggle(value, text); GUILayout.EndHorizontal(); }
+    private static void Step(string text, ref float value, float min, float max, float step, string suffix) { GUILayout.BeginHorizontal(); GUILayout.Label($"{text}: {value:0.##}{suffix}"); if (DrawGreenButton("-", GUILayout.Width(28))) value = Mathf.Clamp(value - step, min, max); if (DrawGreenButton("+", GUILayout.Width(28))) value = Mathf.Clamp(value + step, min, max); GUILayout.EndHorizontal(); }
+    private static void Step(string text, ref int value, int min, int max, int step, string suffix) { GUILayout.BeginHorizontal(); GUILayout.Label($"{text}: {value}{suffix}"); if (DrawGreenButton("-", GUILayout.Width(28))) value = Mathf.Clamp(value - step, min, max); if (DrawGreenButton("+", GUILayout.Width(28))) value = Mathf.Clamp(value + step, min, max); GUILayout.EndHorizontal(); }
+    private static void Slider(string text, ref int value, int min, int max, string suffix) { GUILayout.BeginHorizontal(); GUILayout.Label($"{text}: {value}{suffix}", GUILayout.Width(190f)); GUILayout.FlexibleSpace(); value = Mathf.RoundToInt(GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(100f))); GUILayout.EndHorizontal(); }
+    private static bool DrawPillToggle(bool value, string text) { Color oldColor = GUI.backgroundColor; GUI.backgroundColor = value ? new Color(1f, 0f, 0.5f, 1f) : new Color(0f, 0.45f, 0.9f, 1f); bool clicked = GUILayout.Button(value ? "ON" : "OFF", GUILayout.Width(55), GUILayout.Height(20)); GUI.backgroundColor = oldColor; return clicked ? !value : value; }
+    private static bool DrawGreenButton(string text, params GUILayoutOption[] options) { Color oldColor = GUI.backgroundColor; GUI.backgroundColor = new Color(0.1f, 0.75f, 0.2f, 1f); bool clicked = GUILayout.Button(text, options); GUI.backgroundColor = oldColor; return clicked; }
 }

@@ -34,7 +34,7 @@ public struct CheatToggles
     public static bool noKillCd;
     public static bool showTasksMenu;
     public static bool completeMyTasks;
-    public static bool impostorTasks;
+    public static bool unlockTasksAsImpostor;
     public static bool killReach;
     public static bool killOtherImpostors;
     public static bool killAnyone;
@@ -63,6 +63,7 @@ public struct CheatToggles
     public static bool taskArrows;
     public static bool revealVotes;
     public static bool seeLobbyInfo;
+    public static bool seePlayersInVents;
 
     // Camera
     public static bool spectate;
@@ -99,6 +100,7 @@ public struct CheatToggles
     public static bool unfixableLights;
     public static bool callMeeting;
     public static bool reportBody;
+    public static bool unlockVisualTasks;
     
 
     // Sabotage
@@ -119,10 +121,6 @@ public struct CheatToggles
     public static bool unlockVents;
     public static bool walkInVents;
     public static bool kickVents;
-    public static bool spamTpImps;
-    public static bool spamTpAll;
-    public static bool destroyInGame;
-    public static int destroyInGamePlayerId = -1;
     public static bool immortality;
     public static bool reversedSkeld;
     public static bool blockSabotages;
@@ -130,6 +128,11 @@ public struct CheatToggles
     public static bool doorHallucinationAll;
     public static bool ventTPAll;
     public static int ventTPAllVentIdx = 0;
+    public static bool spamVentTPAll;
+    public static bool spamVentTPRandom;
+    public static bool spamVentTPImps;
+    public static bool destroySelectedPlayer;
+    public static int destroySelectedPlayerId = -1;
     public static bool followSelectedPlayer;
     public static int followSelectedPlayerId = -1;
 
@@ -161,9 +164,12 @@ public struct CheatToggles
     public static bool logDeaths;
     public static bool logShapeshifts;
     public static bool logVents;
+    public static bool logTasks;
+    public static bool logGameState;
 
     // Host-Only
     public static bool voteImmune;
+    public static bool extendedLobbyList;
     
     public static bool showRolesMenu;
     public static bool skipMeeting;
@@ -180,6 +186,7 @@ public struct CheatToggles
     public static bool killAllCrew;
     public static bool killAllImps;
     public static bool levelFarm;
+    public static float levelFarmCooldownMs = 100f;
     public static bool glitchLobbyEngine;
     public static bool voteKick;
     public static bool copyOutfit;
@@ -201,17 +208,6 @@ public struct CheatToggles
     public static bool copyLobbyCodeOnDisconnect;
     public static bool showLobbyTimer;
     public static bool spoofAprilFoolsDate;
-
-    // Anticheat
-    public static bool anticheatEnabled = true;
-    public static bool anticheatDetectPlayerLevels;
-    public static int anticheatDetectPlayerLevelAbove = 500;
-    public static bool anticheatKickPlayerLevels;
-    public static int anticheatKickPlayerLevelBelow = 20;
-    public static bool flagSpoofedPlatformData = true;
-    public static bool anticheatSendNotification = true;
-    public static bool anticheatDiscardRpc = true;
-    public static int anticheatPunishment;
 
     // Modes
     public static bool rgbMode;

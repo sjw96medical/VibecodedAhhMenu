@@ -1,561 +1,238 @@
 using System;
 using System.Collections.Generic;
-using AmongUs.InnerNet.GameDataMessages;
+using System.IO;
+using System.Reflection;
 using HarmonyLib;
 using Hazel;
 using InnerNet;
 using UnityEngine;
 
-namespace TenkaiMenu
+namespace TenkaiMenu;
+
+public static class Anticheat
 {
-    public static class AnticheatGuard
+    public enum ResponseMode { Notify, Kick, Ban }
+
+    public static bool IsEnabled = true;
+    public static float KickCooldownSeconds = 2f;
+    public static ResponseMode DetectionResponseMode = ResponseMode.Notify;
+    public static bool DetectInvalidFriendCodes = true;
+    public static bool BlockInvalidSabotages = true;
+    public static bool UsePlayerBanList = true;
+    public static bool UseNameBanList = true;
+    public static bool UseWordBanList = true;
+    public static bool BanWordsLobbyOnly = true;
+    public static bool HideKickReason;
+    public static bool DetectPlayerLevels;
+    public static int MaxLevelThreshold = 500;
+    public static bool AutoKickLevels;
+    public static int MinLevelThreshold = 20;
+    public static bool DetectInvalidRpcs = true;
+    public static bool LimitRpcRate = true;
+    public static int PacketRateLimit = 50;
+
+    private const float FriendCodeSettleSeconds = 3f;
+    private const float FriendCodeReportInterval = 10f;
+    private const float RepeatedSabotageInterval = 2f;
+    private const float FastTaskInterval = 1.25f;
+    private static readonly Dictionary<int, float> LastAction = new();
+    private static readonly Dictionary<int, int> RpcCounts = new();
+    private static readonly Dictionary<int, TaskState> PlayerStates = new();
+    private sealed class TaskState
     {
-        public static bool IsEnabled { get; set; } = true;
-        public static bool CheckPlatformSpoofing { get; set; } = true;
-        public static bool SendVisualAlerts { get; set; } = true;
-        public static bool DropMaliciousPackets { get; set; } = true;
-        
-        public enum PenaltyMode
-        {
-            None,
-            Kick,
-            ForceDisconnect,
-            Ban
-        }
-
-        public static PenaltyMode CurrentPenalty = PenaltyMode.None;
-
-        private const string AlertPrefix = "<color=#00FFCC><b>[TenkaiMenu Security]</b></color>";
-
-        #region Harmony Network Patches
-
-        [HarmonyPatch(typeof(PlayerControl), nameof(PlayerControl.HandleRpc))]
-        private static class PatchPlayerControlRpc
-        {
-            private static bool Prefix(PlayerControl __instance, byte callId, MessageReader reader)
-            {
-                return ValidateRpc(typeof(PlayerControl), __instance, (RpcCalls)callId, reader);
-            }
-        }
-
-        [HarmonyPatch(typeof(PlayerPhysics), nameof(PlayerPhysics.HandleRpc))]
-        private static class PatchPlayerPhysicsRpc
-        {
-            private static bool Prefix(PlayerPhysics __instance, byte callId, MessageReader reader)
-            {
-                return ValidateRpc(typeof(PlayerPhysics), __instance.myPlayer, (RpcCalls)callId, reader);
-            }
-        }
-
-        [HarmonyPatch(typeof(CustomNetworkTransform), nameof(CustomNetworkTransform.HandleRpc))]
-        private static class PatchNetworkTransformRpc
-        {
-            private static bool Prefix(CustomNetworkTransform __instance, byte callId, MessageReader reader)
-            {
-                return ValidateRpc(typeof(CustomNetworkTransform), __instance.myPlayer, (RpcCalls)callId, reader);
-            }
-        }
-
-        [HarmonyPatch(typeof(ShipStatus), nameof(ShipStatus.HandleRpc))]
-        private static class PatchShipStatusRpc
-        {
-            private static bool Prefix(byte callId, MessageReader reader)
-            {
-                return ValidateRpc(typeof(ShipStatus), null, (RpcCalls)callId, reader);
-            }
-        }
-
-        [HarmonyPatch(typeof(InnerNetClient), nameof(InnerNetClient.HandleGameData))]
-        private static class PatchGameData
-        {
-            private static bool Prefix(InnerNetClient __instance, MessageReader parentReader)
-            {
-                try
-                {
-                    while (parentReader.BytesRemaining > 0)
-                    {
-                        MessageReader subReader = parentReader.ReadMessageAsNewBuffer();
-                        ProcessIncomingGameData(__instance, subReader, ++__instance.msgNum);
-                    }
-                }
-                finally
-                {
-                    parentReader.Recycle();
-                }
-                return false;
-            }
-        }
-
-        [HarmonyPatch(typeof(PlayerControl), nameof(PlayerControl.Start))]
-        private static class PatchPlayerStart
-        {
-            private static void Postfix(PlayerControl __instance)
-            {
-                if (!IsEnabled || !CheckPlatformSpoofing) return;
-
-                ClientData client = AmongUsClient.Instance.GetClientFromCharacter(__instance);
-                if (client?.PlatformData == null) return;
-
-                if (!IsPlatformDataValid(client.PlatformData))
-                {
-                    TriggerViolation(__instance, $"Platform spoof detected for {client.PlayerName} ({client.PlatformData.Platform}).");
-                }
-            }
-        }
-
-        #endregion
-
-        #region Core Logic & Validation Pipelines
-
-        private static void ProcessIncomingGameData(InnerNetClient client, MessageReader reader, int sequence)
-        {
-            GameDataTypes dataType = (GameDataTypes)reader.Tag;
-            bool shouldProcess = true;
-
-            if (IsEnabled && dataType == GameDataTypes.ReadyFlag)
-            {
-                int bufferPos = reader.Position;
-                int targetClientId = reader.ReadPackedInt32();
-                ClientData targetClient = AmongUsClient.Instance.FindClientById(targetClientId);
-
-                if (targetClient == null)
-                {
-                    TriggerViolation($"Discarded ReadyFlag from non-existent client ID: {targetClientId}.");
-                    shouldProcess = false;
-                }
-                else if (targetClient.IsReady)
-                {
-                    TriggerViolation(targetClient.Character, $"Duplicate ReadyFlag received from {targetClient.Character.Data.PlayerName}.");
-                    shouldProcess = false;
-                }
-
-                reader.Position = bufferPos;
-            }
-
-            if (!shouldProcess && DropMaliciousPackets)
-            {
-                reader.Recycle();
-                return;
-            }
-
-            client.StartCoroutine(client.HandleGameDataInner(reader, sequence));
-        }
-
-        private static bool ValidateRpc(Type targetType, PlayerControl sender, RpcCalls call, MessageReader reader)
-        {
-            if (!IsEnabled) return true;
-
-            int initialPos = reader.Position;
-            bool isInvalid = false;
-
-            switch (call)
-            {
-                case RpcCalls.PlayAnimation:
-                    isInvalid = !ValidateAnimation(sender, reader);
-                    break;
-                case RpcCalls.CompleteTask:
-                    isInvalid = !ValidateTaskCompletion(sender, reader);
-                    break;
-                case RpcCalls.Exiled:
-                    TriggerViolation(sender, $"{sender?.Data?.PlayerName} attempted unauthorized Exiled RPC execution.");
-                    isInvalid = true;
-                    break;
-                case RpcCalls.CheckName:
-                case RpcCalls.SetName:
-                    isInvalid = !ValidateNameChange(sender, reader, call);
-                    break;
-                case RpcCalls.SetColor:
-                    isInvalid = !ValidateColorChange(sender, reader);
-                    break;
-                case RpcCalls.ReportDeadBody:
-                    if (GameManager.Instance.IsHideAndSeek())
-                    {
-                        TriggerViolation(sender, $"Illegal body report by {sender?.Data?.PlayerName} in Hide & Seek mode.");
-                        isInvalid = true;
-                    }
-                    break;
-                case RpcCalls.SetScanner:
-                    isInvalid = !ValidateMedicalScanner(sender, reader);
-                    break;
-                case RpcCalls.SetStartCounter:
-                    isInvalid = !ValidateStartCounter(sender, reader);
-                    break;
-                case RpcCalls.EnterVent:
-                case RpcCalls.ExitVent:
-                    isInvalid = !ValidateVentAction(sender, call == RpcCalls.EnterVent);
-                    break;
-                case RpcCalls.SnapTo:
-                    if (LobbyBehaviour.Instance != null)
-                    {
-                        TriggerViolation(sender, $"Position snap exploit flagged for {sender?.Data?.PlayerName} inside lobby.");
-                        isInvalid = true;
-                        if (AmongUsClient.Instance.AmHost && !IsModdedClientPresent())
-                        {
-                            sender.NetTransform.RpcSnapTo(sender.transform.position);
-                        }
-                    }
-                    break;
-                case RpcCalls.AddVote:
-                    int sourceId = reader.ReadPackedInt32();
-                    if (AmongUsClient.Instance.FindClientById(sourceId) == null)
-                    {
-                        TriggerViolation(sender, $"Malformed vote request originating from client ID {sourceId}.");
-                        isInvalid = true;
-                    }
-                    break;
-                case RpcCalls.CloseDoorsOfType:
-                    if (GameManager.Instance.IsHideAndSeek())
-                    {
-                        TriggerViolation("Door operation blocked during Hide & Seek.");
-                        isInvalid = true;
-                    }
-                    break;
-                case RpcCalls.UsePlatform:
-                    isInvalid = !ValidatePlatformUsage(sender);
-                    break;
-                case RpcCalls.UpdateSystem:
-                    isInvalid = !ValidateSystemUpdate(sender, reader);
-                    break;
-                case RpcCalls.SetLevel:
-                    isInvalid = !ValidateLevelAssignment(sender, reader);
-                    break;
-            }
-
-            reader.Position = initialPos;
-            return !isInvalid || !DropMaliciousPackets;
-        }
-
-        #endregion
-
-        #region Individual RPC Handlers
-
-        private static bool ValidateAnimation(PlayerControl player, MessageReader reader)
-        {
-            TaskTypes animationType = (TaskTypes)reader.ReadByte();
-            if (LobbyBehaviour.Instance)
-            {
-                TriggerViolation(player, $"Lobby animation trigger detected ({animationType}) from {player.Data.PlayerName}.");
-                return false;
-            }
-            if (RoleManager.IsImpostorRole(player.Data.RoleType))
-            {
-                TriggerViolation(player, $"Impostor visual animation exploit blocked ({animationType}) for {player.Data.PlayerName}.");
-                return false;
-            }
-            if (!GameManager.Instance.LogicOptions.GetVisualTasks())
-            {
-                TriggerViolation(player, $"Disabled visual task execution ({animationType}) blocked for {player.Data.PlayerName}.");
-                return false;
-            }
-            return true;
-        }
-
-        private static bool ValidateTaskCompletion(PlayerControl player, MessageReader reader)
-        {
-            uint taskIndex = reader.ReadPackedUInt32();
-            if (ShipStatus.Instance == null)
-            {
-                TriggerViolation(player, $"Task completion ({taskIndex}) failed: No active ShipStatus context.");
-                return false;
-            }
-            if (RoleManager.IsImpostorRole(player.Data.RoleType))
-            {
-                TriggerViolation(player, $"Impostor task completion exploit flagged for {player.Data.PlayerName}.");
-                return false;
-            }
-            if (taskIndex >= player.Data.Tasks.Count)
-            {
-                TriggerViolation(player, $"Invalid task index {taskIndex} completed by {player.Data.PlayerName} (Total: {player.Data.Tasks.Count}).");
-                return false;
-            }
-            return true;
-        }
-
-        private static bool ValidateNameChange(PlayerControl player, MessageReader reader, RpcCalls call)
-        {
-            if (call == RpcCalls.SetName)
-            {
-                uint netId = reader.ReadUInt32();
-                uint expectedId = IsModdedClientPresent() ? player.NetId : player.Data.NetId;
-                if (netId != expectedId)
-                {
-                    TriggerViolation(player, $"Spoofed Network ID on name update for {player.Data.PlayerName}.");
-                    return false;
-                }
-            }
-
-            string targetName = reader.ReadString();
-            int maxLength = call == RpcCalls.CheckName ? 10 : 12;
-
-            if (targetName.Length > maxLength || targetName.Contains("<"))
-            {
-                TriggerViolation(player, $"Illegal character sequence or name length violation: '{targetName}'.");
-                return false;
-            }
-            return true;
-        }
-
-        private static bool ValidateColorChange(PlayerControl player, MessageReader reader)
-        {
-            uint netId = reader.ReadUInt32();
-            byte colorId = reader.ReadByte();
-
-            if (netId != player.Data.NetId || colorId >= Palette.ColorNames.Length)
-            {
-                TriggerViolation(player, $"Invalid color packet sent by {player.Data.PlayerName}.", false);
-                player.SetColor((byte)CrewmateColor.Red);
-                return false;
-            }
-            return true;
-        }
-
-        private static bool ValidateMedicalScanner(PlayerControl player, MessageReader reader)
-        {
-            bool isStarting = reader.ReadBoolean();
-            if (!isStarting) return true;
-
-            if (ShipStatus.Instance == null || RoleManager.IsImpostorRole(player.Data.RoleType) || !GameManager.Instance.LogicOptions.GetVisualTasks())
-            {
-                TriggerViolation(player, $"Unauthorized Medbay scan state requested by {player.Data.PlayerName}.");
-                return false;
-            }
-
-            bool hasScanTask = false;
-            foreach (var task in player.Data.Tasks)
-            {
-                if (task.Id == (byte)TaskTypes.SubmitScan)
-                {
-                    hasScanTask = true;
-                    break;
-                }
-            }
-
-            if (!hasScanTask)
-            {
-                TriggerViolation(player, $"Scan request rejected: {player.Data.PlayerName} has no Medbay Scan assignment.");
-                return false;
-            }
-            return true;
-        }
-
-        private static bool ValidateStartCounter(PlayerControl player, MessageReader reader)
-        {
-            reader.ReadPackedInt32();
-            sbyte duration = reader.ReadSByte();
-
-            if (player.OwnerId != AmongUsClient.Instance.HostId && duration != -1)
-            {
-                TriggerViolation(player, $"Unauthorized lobby start timer modification by {player.Data.PlayerName}.");
-                if (AmongUsClient.Instance.AmHost)
-                {
-                    PlayerControl.LocalPlayer.RpcSetStartCounter(-1);
-                }
-                return false;
-            }
-            return true;
-        }
-
-        private static bool ValidateVentAction(PlayerControl player, bool isEntering)
-        {
-            if (ShipStatus.Instance == null)
-            {
-                TriggerViolation(player, $"Vent event rejected: Active map instance not found.");
-                return false;
-            }
-            if (!player.Data.IsDead && !player.Data.Role.CanVent)
-            {
-                TriggerViolation(player, $"Role '{player.Data.RoleType}' for {player.Data.PlayerName} is not permitted to use vents.");
-                return false;
-            }
-            if (GameManager.Instance.IsHideAndSeek() && RoleManager.IsImpostorRole(player.Data.RoleType))
-            {
-                TriggerViolation(player, $"Impostor vent usage in Hide & Seek mode blocked for {player.Data.PlayerName}.");
-                return false;
-            }
-            return true;
-        }
-
-        private static bool ValidatePlatformUsage(PlayerControl player)
-        {
-            if ((MapNames)Utils.GetCurrentMapID() != MapNames.Airship || ShipStatus.Instance == null || GameManager.Instance.IsHideAndSeek())
-            {
-                TriggerViolation(player, $"Illegal platform movement event received from {player.Data.PlayerName}.");
-                return false;
-            }
-            return true;
-        }
-
-        private static bool ValidateSystemUpdate(PlayerControl player, MessageReader reader)
-        {
-            SystemTypes targetSystem = (SystemTypes)reader.ReadByte();
-            PlayerControl targetPlayer = reader.ReadNetObject<PlayerControl>();
-
-            if (!ShipStatus.Instance.Systems.ContainsKey(targetSystem))
-            {
-                TriggerViolation(targetPlayer, $"System update targeting unavailable system {targetSystem}.");
-                return false;
-            }
-
-            if (targetPlayer.Data.IsDead && targetSystem != SystemTypes.MedBay && targetSystem != SystemTypes.Sabotage &&
-                targetSystem != SystemTypes.Security && targetSystem != SystemTypes.Ventilation)
-            {
-                TriggerViolation(targetPlayer, $"Dead player attempted prohibited system interaction on {targetSystem}.");
-                return false;
-            }
-
-            if (targetSystem == SystemTypes.Sabotage)
-            {
-                SystemTypes sabotageType = (SystemTypes)reader.ReadByte();
-                if (!RoleManager.IsImpostorRole(targetPlayer.Data.RoleType) || GameManager.Instance.IsHideAndSeek() || !IsValidSabotageType(sabotageType))
-                {
-                    TriggerViolation(targetPlayer, $"Illegal sabotage request for system {sabotageType}.");
-                    return false;
-                }
-            }
-            else if (targetSystem == SystemTypes.Electrical)
-            {
-                byte switchState = reader.ReadByte();
-                if ((switchState & 128) != 0 || switchState > 5 || MeetingHud.Instance)
-                {
-                    TriggerViolation(targetPlayer, $"Prohibited electrical switch update from {targetPlayer.Data.PlayerName}.");
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private static bool ValidateLevelAssignment(PlayerControl player, MessageReader reader)
-        {
-            int requestedLevel = reader.ReadPackedInt32();
-            if (requestedLevel > 100000)
-            {
-                TriggerViolation(player, $"Out-of-range level packet ({requestedLevel}) from {player.Data.PlayerName}.");
-                return false;
-            }
-
-            if (player != null && player != PlayerControl.LocalPlayer && AmongUsClient.Instance.AmHost)
-            {
-                int trueLevel = requestedLevel + 1;
-                if (CheatToggles.anticheatEnabled && CheatToggles.anticheatDetectPlayerLevels && trueLevel > CheatToggles.anticheatDetectPlayerLevelAbove)
-                {
-                    TriggerViolation(player, $"Player level {trueLevel} exceeded monitoring threshold.", false);
-                }
-
-                if (CheatToggles.anticheatEnabled && CheatToggles.anticheatKickPlayerLevels && trueLevel <= CheatToggles.anticheatKickPlayerLevelBelow)
-                {
-                    TriggerViolation($"{player.Data.PlayerName} auto-kicked (Level {trueLevel} below minimum requirement).");
-                    ExecutePunishment(player);
-                }
-            }
-            return true;
-        }
-
-        #endregion
-
-        #region Helper Utilities
-
-        public static void TriggerViolation(PlayerControl player, string logDetails, bool executePenalty = true)
-        {
-            if (player == PlayerControl.LocalPlayer) return;
-
-            if (SendVisualAlerts)
-            {
-                DispatchNotification(logDetails);
-            }
-
-            if (AmongUsClient.Instance.AmHost && executePenalty)
-            {
-                ExecutePunishment(player);
-            }
-        }
-
-        public static void TriggerViolation(string logDetails)
-        {
-            if (SendVisualAlerts)
-            {
-                DispatchNotification(logDetails);
-            }
-        }
-
-        private static void DispatchNotification(string message)
-        {
-            if (HudManager.Instance?.Notifier != null)
-            {
-                HudManager.Instance.Notifier.AddDisconnectMessage($"{AlertPrefix} {message}");
-            }
-            else
-            {
-                Debug.Log($"[TenkaiMenu Security] {message}");
-            }
-        }
-
-        private static void ExecutePunishment(PlayerControl player)
-        {
-            switch (CurrentPenalty)
-            {
-                case PenaltyMode.Kick:
-                    AmongUsClient.Instance.KickPlayer(player.OwnerId, false);
-                    break;
-                case PenaltyMode.ForceDisconnect:
-                    if (AmongUsClient.Instance.GameState != InnerNetClient.GameStates.Started)
-                    {
-                        AmongUsClient.Instance.KickPlayer(player.OwnerId, false);
-                    }
-                    else
-                    {
-                        AmongUsClient.Instance.SendLateRejection(player.OwnerId, DisconnectReasons.ClientTimeout);
-                    }
-                    break;
-                case PenaltyMode.Ban:
-                    AmongUsClient.Instance.KickPlayer(player.OwnerId, true);
-                    break;
-            }
-        }
-
-        public static bool IsModdedClientPresent()
-        {
-            if (Constants.IsVersionModded() || PlayerControl.LocalPlayer?.Data == null) return false;
-            return PlayerControl.LocalPlayer.Data.OwnerId != AmongUsClient.Instance.HostId;
-        }
-
-        public static bool IsValidSabotageType(SystemTypes type)
-        {
-            return type == SystemTypes.Electrical || type == SystemTypes.LifeSupp || type == SystemTypes.Comms ||
-                   type == SystemTypes.Reactor || type == SystemTypes.Laboratory || type == SystemTypes.HeliSabotage ||
-                   type == SystemTypes.MushroomMixupSabotage || type == SystemTypes.Sabotage;
-        }
-
-        public static bool IsPlatformDataValid(PlatformSpecificData data)
-        {
-            string name = data.PlatformName;
-            ulong xuid = data.XboxPlatformId;
-            ulong psid = data.PsnPlatformId;
-
-            switch (data.Platform)
-            {
-                case Platforms.StandaloneEpicPC:
-                case Platforms.StandaloneSteamPC:
-                case Platforms.StandaloneMac:
-                case Platforms.StandaloneItch:
-                case Platforms.IPhone:
-                case Platforms.Android:
-                    return name == "TESTNAME" && xuid == 0 && psid == 0;
-                case Platforms.StandaloneWin10:
-                    return name == "TESTNAME" && xuid != 0 && psid == 0;
-                case Platforms.Xbox:
-                    return name != "TESTNAME" && name.Length >= 3 && name.Length <= 16 && xuid != 0 && psid == 0;
-                case Platforms.Playstation:
-                    return name != "TESTNAME" && xuid == 0 && psid != 0;
-                case Platforms.Switch:
-                    return name != "TESTNAME" && xuid == 0 && psid == 0;
-                case (Platforms)255:
-                    return AmongUsClient.Instance.NetworkMode == NetworkModes.LocalGame;
-                default:
-                    return false;
-            }
-        }
-
-        #endregion
+        public uint LastTaskId = uint.MaxValue;
+        public float LastTaskTime = -999f;
+        public float LastSabotageTime = -999f;
+        public byte LastSabotageAmount;
+        public string LastFriendCode = "";
+        public float FriendCodeStableSince = -999f;
+        public float LastInvalidFriendCodeReportTime = -999f;
+        public bool HasSetLevel;
+        public bool HasSetName;
+        public int TimesAttemptedKilled;
     }
+
+    private static float lastRateReset;
+    private static float lastBanCheck;
+    private static readonly string SaveDirectory = Path.Combine(BepInEx.Paths.ConfigPath, "TenkaiMenu");
+    private static string PlayerList => Path.Combine(SaveDirectory, "BanPlayerList.txt");
+    private static string NameList => Path.Combine(SaveDirectory, "BanNameList.txt");
+    private static string WordList => Path.Combine(SaveDirectory, "BanWordList.txt");
+
+    public static void Initialize() => EnsureLists();
+
+    public static void ResetRoundState()
+    {
+        PlayerStates.Clear();
+        RpcCounts.Clear();
+        LastAction.Clear();
+    }
+
+    public static void Update()
+    {
+        if (!IsEnabled || !Utils.isInGame || Time.time - lastBanCheck < 1f) return;
+        lastBanCheck = Time.time;
+        EnsureLists();
+
+        foreach (var player in PlayerControl.AllPlayerControls)
+        {
+            if (IsIgnoredPlayer(player) || player.Data == null) continue;
+            var state = GetState(player);
+            string friendCode = GetDataString(player.Data, "FriendCode");
+            TrackFriendCode(state, friendCode);
+
+            bool settled = !string.IsNullOrWhiteSpace(friendCode) && Time.time - state.FriendCodeStableSince >= FriendCodeSettleSeconds;
+            bool reportDue = Time.time - state.LastInvalidFriendCodeReportTime >= FriendCodeReportInterval;
+            if (DetectInvalidFriendCodes && settled && reportDue && !IsValidFriendCode(friendCode))
+            {
+                state.LastInvalidFriendCodeReportTime = Time.time;
+                Report(player, "Invalid friend code.");
+            }
+            else if (UsePlayerBanList && MatchesPlayerList(player)) Report(player, "Player is on the ban player list.");
+            else if (UseNameBanList && MatchesNameList(player.Data.PlayerName)) Report(player, "Player name is on the ban name list.");
+        }
+    }
+
+    public static bool CheckRpc(PlayerControl player, byte callId, MessageReader reader)
+    {
+        if (!IsEnabled || IsIgnoredPlayer(player) || player.Data == null) return true;
+        int initialPosition = reader.Position;
+        try
+        {
+            if (!DetectInvalidRpcs) return true;
+            if (!AllowRate(player)) return false;
+            if (!IsKnownRpc(callId) && player.OwnerId != AmongUsClient.Instance.HostId)
+                return Report(player, $"Unregistered RPC received: {callId}");
+
+            if (player.OwnerId != AmongUsClient.Instance.HostId && CheckGameplayRpcRules(player, callId)) return false;
+            if (callId == (byte)RpcCalls.SetLevel && !CheckLevel(player, reader)) return false;
+            if (callId == (byte)RpcCalls.SetName && !CheckName(player, reader)) return false;
+            if (callId == (byte)RpcCalls.CompleteTask && !CheckTask(player, reader)) return false;
+            if (callId == (byte)RpcCalls.MurderPlayer && !CheckMurder(player, reader)) return false;
+            if (callId == (byte)RpcCalls.SendChat && UseWordBanList && (!BanWordsLobbyOnly || Utils.isLobby) && reader.BytesRemaining > 0 && FileMatches(WordList, reader.ReadString()))
+                return Report(player, "Chat message contains a banned word.");
+            return true;
+        }
+        finally { reader.Position = initialPosition; }
+    }
+
+    private static bool CheckGameplayRpcRules(PlayerControl player, byte callId)
+    {
+        if (callId is (byte)RpcCalls.EnterVent or (byte)RpcCalls.ExitVent && !player.Data.IsDead && !player.Data.Role.CanVent)
+            return !Report(player, "Player without a vent-capable role attempted to use a vent.");
+        if (callId == (byte)RpcCalls.CloseDoorsOfType && !RoleManager.IsImpostorRole(player.Data.RoleType))
+            return !Report(player, "Non-impostor attempted to close doors.");
+        if (callId is (byte)RpcCalls.SetTasks or (byte)RpcCalls.ExtendLobbyTimer or (byte)RpcCalls.CloseMeeting)
+            return !Report(player, "Host-only RPC received from a client.");
+        if (Utils.isInGame && callId is (byte)RpcCalls.SetColor or (byte)RpcCalls.SetHatStr or (byte)RpcCalls.SetSkinStr or (byte)RpcCalls.SetVisorStr or (byte)RpcCalls.SetPetStr or (byte)RpcCalls.SetNamePlateStr)
+            return !Report(player, "Cosmetic RPC received during gameplay.");
+        if (Utils.isLobby && callId is (byte)RpcCalls.StartMeeting or (byte)RpcCalls.ReportDeadBody or (byte)RpcCalls.SendChatNote or (byte)RpcCalls.CloseMeeting or (byte)RpcCalls.Exiled or (byte)RpcCalls.CastVote or (byte)RpcCalls.ClearVote or (byte)RpcCalls.SetRole or (byte)RpcCalls.CompleteTask or (byte)RpcCalls.MurderPlayer)
+            return !Report(player, "Gameplay RPC received in the lobby.");
+        return false;
+    }
+
+    private static bool CheckLevel(PlayerControl player, MessageReader reader)
+    {
+        int level = reader.ReadPackedInt32() + 1;
+        var state = GetState(player);
+        if (state.HasSetLevel && !Utils.isLocalGame) return Report(player, "Player attempted to set their level more than once.");
+        state.HasSetLevel = true;
+        if (DetectPlayerLevels && level > MaxLevelThreshold) Report(player, $"Player level {level} exceeds the configured limit.", false);
+        return !(AutoKickLevels && level <= MinLevelThreshold) || Report(player, $"Player level {level} is below the configured minimum.");
+    }
+
+    private static bool CheckName(PlayerControl player, MessageReader reader)
+    {
+        if (Utils.isHost || reader.BytesRemaining <= 4) return true;
+        var state = GetState(player);
+        reader.ReadUInt32();
+        string name = reader.ReadString();
+        if (state.HasSetName && !Utils.isLocalGame) return Report(player, "Player attempted to change their name more than once.");
+        state.HasSetName = true;
+        return !name.Contains("<") || Report(player, "Invalid name content.");
+    }
+
+    private static bool CheckTask(PlayerControl player, MessageReader reader)
+    {
+        uint taskId = reader.ReadPackedUInt32();
+        var state = GetState(player);
+        bool assigned = false;
+        foreach (var task in player.Data.Tasks) if (task.Id == taskId) { assigned = true; break; }
+        if (RoleManager.IsImpostorRole(player.Data.RoleType)) return Report(player, "Impostor attempted to complete a task.");
+        if (!assigned) return Report(player, $"Task ID {taskId} is not assigned to the player.");
+        if (state.LastTaskId == taskId) return Report(player, $"Task ID {taskId} was completed more than once.");
+        float elapsed = Time.time - state.LastTaskTime;
+        if (elapsed < FastTaskInterval) return Report(player, $"Tasks were completed too quickly ({elapsed:0.##} seconds apart).");
+        state.LastTaskTime = Time.time;
+        state.LastTaskId = taskId;
+        return true;
+    }
+
+    private static bool CheckMurder(PlayerControl player, MessageReader reader)
+    {
+        PlayerControl target = reader.ReadNetObject<PlayerControl>();
+        if (target == null) return true;
+        if (!RoleManager.IsImpostorRole(player.Data.RoleType) || player.Data.IsDead || RoleManager.IsImpostorRole(target.Data.RoleType))
+            return Report(player, "Invalid murder attempt.");
+        if (!target.Data.IsDead) return true;
+        var state = GetState(player);
+        state.TimesAttemptedKilled++;
+        if (state.TimesAttemptedKilled >= 10) return Report(player, "Repeated murder attempts against a dead player.");
+        return false;
+    }
+
+    public static bool CheckSystemUpdate(PlayerControl player, SystemTypes systemType, MessageReader reader)
+    {
+        if (!IsEnabled || !BlockInvalidSabotages || IsIgnoredPlayer(player) || player.Data == null || player.OwnerId == AmongUsClient.Instance.HostId) return true;
+        if (systemType is not (SystemTypes.Sabotage or SystemTypes.Electrical or SystemTypes.Comms or SystemTypes.Reactor or SystemTypes.LifeSupp or SystemTypes.Laboratory or SystemTypes.HeliSabotage)) return true;
+        int initialPosition = reader.Position;
+        try
+        {
+            byte amount = reader.ReadByte();
+            var state = GetState(player);
+            bool repeated = amount == state.LastSabotageAmount && Time.time - state.LastSabotageTime <= RepeatedSabotageInterval;
+            bool invalid = systemType == SystemTypes.Sabotage
+                ? !RoleManager.IsImpostorRole(player.Data.RoleType) || (ShipStatus.Instance.Systems[SystemTypes.Sabotage].Cast<SabotageSystemType>().Timer > 0f && !repeated)
+                : IsDirectSabotage(systemType, amount);
+            if (!invalid)
+            {
+                if (systemType == SystemTypes.Sabotage) { state.LastSabotageAmount = amount; state.LastSabotageTime = Time.time; }
+                return true;
+            }
+            Notify(player, "Invalid sabotage RPC received.");
+            Respond(player, "Invalid sabotage RPC received.");
+            return false;
+        }
+        finally { reader.Position = initialPosition; }
+    }
+
+    private static bool IsDirectSabotage(SystemTypes systemType, byte amount) => systemType is SystemTypes.Electrical or SystemTypes.Comms or SystemTypes.Reactor or SystemTypes.Laboratory or SystemTypes.HeliSabotage or SystemTypes.LifeSupp && (amount & 128) != 0;
+    private static TaskState GetState(PlayerControl player) { if (!PlayerStates.TryGetValue(player.OwnerId, out var state)) PlayerStates[player.OwnerId] = state = new TaskState(); return state; }
+    private static void TrackFriendCode(TaskState state, string friendCode) { if (friendCode == state.LastFriendCode) return; state.LastFriendCode = friendCode; state.FriendCodeStableSince = Time.time; state.LastInvalidFriendCodeReportTime = -999f; }
+    private static bool AllowRate(PlayerControl player) { if (!LimitRpcRate) return true; if (Time.time - lastRateReset >= 1f) { RpcCounts.Clear(); lastRateReset = Time.time; } RpcCounts.TryGetValue(player.OwnerId, out int count); RpcCounts[player.OwnerId] = ++count; return count <= Mathf.Max(1, PacketRateLimit) || Report(player, "RPC rate limit exceeded."); }
+    private static bool Report(PlayerControl player, string reason, bool respond = true) { if (IsIgnoredPlayer(player)) return true; Notify(player, reason); if (respond) Respond(player, reason); return !Utils.isHost || DetectionResponseMode == ResponseMode.Notify || !respond; }
+    private static void Respond(PlayerControl player, string reason) { if (!Utils.isHost || player == null || Time.time - (LastAction.TryGetValue(player.OwnerId, out float time) ? time : -999f) < KickCooldownSeconds) return; LastAction[player.OwnerId] = Time.time; if (DetectionResponseMode != ResponseMode.Notify) AmongUsClient.Instance.KickPlayer(player.OwnerId, DetectionResponseMode == ResponseMode.Ban); }
+    private static void Notify(PlayerControl player, string reason) { if (HideKickReason) reason = "Unauthorized action detected."; HudManager.Instance?.Notifier?.AddDisconnectMessage($"<color=#4f92ff><b>[TenkaiMenu Anti-Cheat]</b></color> {player?.Data?.PlayerName}: {reason}"); }
+    private static bool IsKnownRpc(byte callId) { foreach (RpcCalls rpc in Enum.GetValues(typeof(RpcCalls))) if ((byte)rpc == callId) return true; return false; }
+    private static bool IsValidFriendCode(string value) { if (string.IsNullOrWhiteSpace(value)) return false; int separator = value.LastIndexOf('#'); if (separator <= 0 || value.Length - separator - 1 != 4) return false; for (int i = separator + 1; i < value.Length; i++) if (!char.IsDigit(value[i])) return false; return true; }
+    private static bool IsIgnoredPlayer(PlayerControl player) => player == null || player == PlayerControl.LocalPlayer || player.AmOwner || (AmongUsClient.Instance != null && player.OwnerId == AmongUsClient.Instance.ClientId);
+    private static string GetDataString(object data, string property) { try { return data.GetType().GetProperty(property, BindingFlags.Public | BindingFlags.Instance)?.GetValue(data)?.ToString() ?? ""; } catch { return ""; } }
+    private static bool MatchesPlayerList(PlayerControl player) => FileMatches(PlayerList, GetDataString(player.Data, "FriendCode")) || FileMatches(PlayerList, GetDataString(player.Data, "Puid"));
+    private static bool MatchesNameList(string name) => FileMatches(NameList, name);
+    private static bool FileMatches(string path, string value) { if (string.IsNullOrWhiteSpace(value) || !File.Exists(path)) return false; foreach (string raw in File.ReadAllLines(path)) { string pattern = raw.Trim(); if (pattern.Length == 0 || pattern.StartsWith("//") || pattern.StartsWith("#")) continue; if (pattern.StartsWith("**") && pattern.EndsWith("**") && value.Contains(pattern[2..^2], StringComparison.OrdinalIgnoreCase)) return true; if (pattern.StartsWith("**") && value.EndsWith(pattern[2..], StringComparison.OrdinalIgnoreCase)) return true; if (pattern.EndsWith("**") && value.StartsWith(pattern[..^2], StringComparison.OrdinalIgnoreCase)) return true; if (string.Equals(pattern, value, StringComparison.OrdinalIgnoreCase)) return true; } return false; }
+    private static void EnsureLists() { if (!Directory.Exists(SaveDirectory)) Directory.CreateDirectory(SaveDirectory); foreach (string path in new[] { PlayerList, NameList, WordList }) if (!File.Exists(path)) File.WriteAllText(path, "# Enter one entry per line\n"); }
+    private static bool IsPlatformValid(object platformData) { string platform = platformData.GetType().GetProperty("Platform")?.GetValue(platformData)?.ToString() ?? ""; if (string.IsNullOrWhiteSpace(platform) || platform.Equals("Unknown", StringComparison.OrdinalIgnoreCase)) return false; string property = platform.Contains("Playstation", StringComparison.OrdinalIgnoreCase) ? "PsnPlatformId" : "XboxPlatformId"; string id = platformData.GetType().GetProperty(property)?.GetValue(platformData)?.ToString() ?? ""; if (platform.Contains("StandaloneWin10", StringComparison.OrdinalIgnoreCase) || platform.Contains("Xbox", StringComparison.OrdinalIgnoreCase)) return id.Length is >= 10 and <= 16; if (platform.Contains("Playstation", StringComparison.OrdinalIgnoreCase)) return id.Length is >= 14 and <= 20; return true; }
+    [HarmonyPatch(typeof(PlayerControl), nameof(PlayerControl.Start))]
+    private static class PlayerStartPlatformPatch
+    {
+        private static void Postfix(PlayerControl __instance) { if (!IsEnabled || !Utils.isLobby || IsIgnoredPlayer(__instance)) return; try { var client = AmongUsClient.Instance.GetClientFromCharacter(__instance); var platformData = client?.PlatformData; if (platformData != null && !IsPlatformValid(platformData)) Report(__instance, "Invalid platform data detected."); } catch { } }
+    }
+    [HarmonyPatch(typeof(PlayerControl), nameof(PlayerControl.HandleRpc))]
+    private static class PlayerControlRpcPatch { private static bool Prefix(PlayerControl __instance, byte callId, MessageReader reader) => CheckRpc(__instance, callId, reader); }
+    [HarmonyPatch(typeof(PlayerPhysics), nameof(PlayerPhysics.HandleRpc))]
+    private static class PlayerPhysicsRpcPatch { private static bool Prefix(PlayerPhysics __instance, byte callId, MessageReader reader) => CheckRpc(__instance.myPlayer, callId, reader); }
+    [HarmonyPatch(typeof(CustomNetworkTransform), nameof(CustomNetworkTransform.HandleRpc))]
+    private static class NetworkTransformRpcPatch { private static bool Prefix(CustomNetworkTransform __instance, byte callId, MessageReader reader) => CheckRpc(__instance.myPlayer, callId, reader); }
+    [HarmonyPatch(typeof(ShipStatus), nameof(ShipStatus.UpdateSystem), typeof(SystemTypes), typeof(PlayerControl), typeof(MessageReader))]
+    private static class UpdateSystemPatch { private static bool Prefix(SystemTypes systemType, PlayerControl player, MessageReader msgReader) => CheckSystemUpdate(player, systemType, msgReader); }
 }

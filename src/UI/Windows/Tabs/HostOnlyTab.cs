@@ -197,6 +197,12 @@ public class HostOnlyTab : ITab
         }
 
         CheatToggles.levelFarm = DrawPillToggle(CheatToggles.levelFarm, "Level Farm");
+
+        GUILayout.Label($"Level Farm Cooldown: {Mathf.RoundToInt(CheatToggles.levelFarmCooldownMs)} ms");
+        CheatToggles.levelFarmCooldownMs = Mathf.Clamp(
+            Mathf.Round(GUILayout.HorizontalSlider(CheatToggles.levelFarmCooldownMs, 10f, 200f)),
+            10f,
+            200f);
     }
 
     private void DrawHostControls()

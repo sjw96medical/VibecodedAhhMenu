@@ -25,6 +25,10 @@ public class ConsoleTab : ITab
         CheatToggles.logShapeshifts = DrawPillToggle(CheatToggles.logShapeshifts, "Log Shapeshifts");
 
         CheatToggles.logVents = DrawPillToggle(CheatToggles.logVents, "Log Vents");
+
+        CheatToggles.logTasks = DrawPillToggle(CheatToggles.logTasks, "Log Tasks");
+
+        CheatToggles.logGameState = DrawPillToggle(CheatToggles.logGameState, "Log Game State");
     }
 
     // Bulletproof Dashboard Pill Toggle

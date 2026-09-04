@@ -172,12 +172,7 @@ public class MenuUI : MonoBehaviour
             CheatToggles.closeCurrentDoors = false;
         }
 
-        // Sync Anticheat values from menu toggles to runtime logic
-        AnticheatGuard.IsEnabled = CheatToggles.anticheatEnabled;
-        AnticheatGuard.CheckPlatformSpoofing = CheatToggles.flagSpoofedPlatformData;
-        AnticheatGuard.SendVisualAlerts = CheatToggles.anticheatSendNotification;
-        AnticheatGuard.DropMaliciousPackets = CheatToggles.anticheatDiscardRpc;
-        AnticheatGuard.CurrentPenalty = (AnticheatGuard.PenaltyMode)Mathf.Clamp(CheatToggles.anticheatPunishment, 0, 3);
+        Anticheat.Update();
 
         if (CheatToggles.spawnMeetingHud != _lastSpawnMeetingHudState)
         {

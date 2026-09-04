@@ -18,9 +18,6 @@ public static class PlayerPhysics_LateUpdate
         TenkaiCheats.KillAllCheat();
         TenkaiCheats.KillAllCrewCheat();
         TenkaiCheats.KillAllImpsCheat();
-        TenkaiCheats.SpamTpImpsCheat();
-        TenkaiCheats.SpamTpAllCheat();
-        TenkaiCheats.DestroyInGameCheat();
         TenkaiCheats.LevelFarmCheat();
         TenkaiCheats.ForceStartGameCheat();
         TenkaiCheats.TeleportCursorCheat();
@@ -97,16 +94,6 @@ public static class PlayerPhysics_LateUpdate
                 }
             }
 
-            // Destroy in-game cleanup (extra safety; DestroyInGameCheat also handles this)
-            if (CheatToggles.destroyInGame && CheatToggles.destroyInGamePlayerId >= 0)
-            {
-                bool found = PlayerControl.AllPlayerControls.ToArray().Any(p => p != null && p.Data != null && !p.Data.Disconnected && p.PlayerId == CheatToggles.destroyInGamePlayerId);
-                if (!found)
-                {
-                    CheatToggles.destroyInGame = false;
-                    CheatToggles.destroyInGamePlayerId = -1;
-                }
-            }
         }
         catch { }
     }

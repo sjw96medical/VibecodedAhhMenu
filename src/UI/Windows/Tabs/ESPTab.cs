@@ -47,6 +47,8 @@ public class ESPTab : ITab
         CheatToggles.revealVotes = DrawPillToggle(CheatToggles.revealVotes, "Reveal Votes");
 
         CheatToggles.seeLobbyInfo = DrawPillToggle(CheatToggles.seeLobbyInfo, "See Lobby Info");
+
+        CheatToggles.seePlayersInVents = DrawPillToggle(CheatToggles.seePlayersInVents, "See Players in Vents");
     }
 
     private void DrawCamera()

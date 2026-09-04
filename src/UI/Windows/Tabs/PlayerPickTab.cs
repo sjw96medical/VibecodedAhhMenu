@@ -212,22 +212,21 @@ public class PlayerPickTab : ITab
         }
         GUILayout.EndHorizontal();
 
-        GUILayout.BeginHorizontal();
-        string destroyButtonText = CheatToggles.destroyInGame && CheatToggles.destroyInGamePlayerId == player.PlayerId ? "Stop Destroy [In-game]" : "Destroy [In-game]";
-        if (DrawRedButton(destroyButtonText, GUIStylePreset.NormalButton, GUILayout.Height(30f)))
+        if (player != PlayerControl.LocalPlayer && AmongUsClient.Instance != null && player.OwnerId != AmongUsClient.Instance.HostId)
         {
-            if (CheatToggles.destroyInGame && CheatToggles.destroyInGamePlayerId == player.PlayerId)
+            if (DrawRedButton("Error Ban", GUIStylePreset.NormalButton, GUILayout.Height(30f)))
             {
-                CheatToggles.destroyInGame = false;
-                CheatToggles.destroyInGamePlayerId = -1;
-            }
-            else
-            {
-                CheatToggles.destroyInGame = true;
-                CheatToggles.destroyInGamePlayerId = player.PlayerId;
+                TenkaiCheats.ErrorBan(player);
             }
         }
-        GUILayout.EndHorizontal();
+
+        string destroyButtonText = CheatToggles.destroySelectedPlayer && CheatToggles.destroySelectedPlayerId == player.PlayerId
+            ? "Stop Destroy"
+            : "Destroy [In-Game]";
+        if (DrawRedButton(destroyButtonText, GUIStylePreset.NormalButton, GUILayout.Height(30f)))
+        {
+            TenkaiCheats.ToggleDestroySelectedPlayer(player);
+        }
 
         GUILayout.Space(10f);
 

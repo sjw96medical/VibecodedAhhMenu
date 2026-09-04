@@ -32,6 +32,8 @@ public class ShipTab : ITab
     {
         CheatToggles.unfixableLights = DrawPillToggle(CheatToggles.unfixableLights, "Unfixable Lights");
 
+        CheatToggles.unlockVisualTasks = DrawPillToggle(CheatToggles.unlockVisualTasks, "Unlock Visual Tasks");
+
         bool glitchLobbyEngine = DrawPillToggle(CheatToggles.glitchLobbyEngine, "Glitch Lobby Engine");
         if (glitchLobbyEngine != CheatToggles.glitchLobbyEngine)
         {
@@ -60,7 +62,14 @@ public class ShipTab : ITab
 
         if (DrawGreenButton(" Close Meeting"))
         {
-            CheatToggles.closeMeeting = true;
+            if (Utils.isHost)
+            {
+                try { HudManager.Instance.Notifier.AddDisconnectMessage("<color=#fff><b><color=#c40033>TenkaiMenu</color></b>: Close Meeting failed because it is for non-hosts. Use Skip Meeting from the Host Only tab instead."); } catch { }
+            }
+            else
+            {
+                CheatToggles.closeMeeting = true;
+            }
         }
 
         CheatToggles.autoOpenDoorsOnUse = DrawPillToggle(CheatToggles.autoOpenDoorsOnUse, "Auto-Open Doors On Use");
@@ -149,12 +158,47 @@ public class ShipTab : ITab
 
         CheatToggles.walkInVents = DrawPillToggle(CheatToggles.walkInVents, "Walk In Vents");
 
-        if (DrawGreenButton(" TP Everyone to Vent"))
+        bool hasVents = ShipStatus.Instance?.AllVents != null && ShipStatus.Instance.AllVents.Count > 0;
+        bool ventsReady = false;
+        if (Utils.isInGame && hasVents)
         {
-            TenkaiCheats.TeleportAllToVent();
+            CheatToggles.ventTPAllVentIdx = Mathf.Clamp(
+                CheatToggles.ventTPAllVentIdx, 0, ShipStatus.Instance.AllVents.Count - 1);
+            Vent selectedVent = ShipStatus.Instance.AllVents[CheatToggles.ventTPAllVentIdx];
+            ventsReady = selectedVent != null && !string.IsNullOrEmpty(selectedVent.name);
         }
 
-        CheatToggles.spamTpAll = DrawPillToggle(CheatToggles.spamTpAll, "Spam TP All");
+        if (ventsReady)
+        {
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("<", GUILayout.Width(30))) CheatToggles.ventTPAllVentIdx--;
+            GUILayout.Label($"Vent: {ShipStatus.Instance.AllVents[CheatToggles.ventTPAllVentIdx].name}");
+            if (GUILayout.Button(">", GUILayout.Width(30))) CheatToggles.ventTPAllVentIdx++;
+            GUILayout.EndHorizontal();
+
+        }
+
+        if (DrawGreenButton("TP Everyone to Vent") && hasVents)
+        {
+            TenkaiCheats.TeleportEveryoneToVent(CheatToggles.ventTPAllVentIdx);
+        }
+
+        bool spamVentTPAll = DrawPillToggle(CheatToggles.spamVentTPAll, "Spam TP All");
+        if (spamVentTPAll != CheatToggles.spamVentTPAll)
+        {
+            CheatToggles.spamVentTPAll = spamVentTPAll;
+            if (spamVentTPAll) CheatToggles.spamVentTPRandom = false;
+        }
+
+        bool spamVentTPRandom = DrawPillToggle(CheatToggles.spamVentTPRandom, "Spam TP All to Random Vents");
+        if (spamVentTPRandom != CheatToggles.spamVentTPRandom)
+        {
+            CheatToggles.spamVentTPRandom = spamVentTPRandom;
+            if (spamVentTPRandom) CheatToggles.spamVentTPAll = false;
+        }
+
+        CheatToggles.spamVentTPImps = DrawPillToggle(CheatToggles.spamVentTPImps, "Spam TP Imps");
+
     }
     
     // Custom Helper for Reusable Green Action Buttons
@@ -189,7 +233,6 @@ public class ShipTab : ITab
         
         // 3. Set background color (Hot Pink/Red if ON, Sleek Blue if OFF)
         GUI.backgroundColor = value ? new Color(1f, 0f, 0.5f, 1f) : new Color(0f, 0.45f, 0.9f, 1f);
-        
         // 4. Create a clean pill button that flips the value instantly when clicked
         if (GUILayout.Button(value ? "ON" : "OFF", GUILayout.Width(55), GUILayout.Height(20)))
         {

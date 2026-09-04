@@ -32,6 +32,26 @@ public static class AmongUsClient_OnGameJoined
 
     public static void Postfix(string gameIdString)
     {
+        Anticheat.ResetRoundState();
         lastGameIdString = gameIdString;
+    }
+}
+
+[HarmonyPatch(typeof(AmongUsClient), nameof(AmongUsClient.CoStartGame))]
+public static class AmongUsClient_CoStartGame
+{
+    public static void Postfix()
+    {
+        if (CheatToggles.logGameState) ConsoleUI.Log("Game started");
+    }
+}
+
+[HarmonyPatch(typeof(AmongUsClient), nameof(AmongUsClient.OnGameEnd))]
+public static class AmongUsClient_OnGameEnd
+{
+    public static void Postfix(EndGameResult endGameResult)
+    {
+        Anticheat.ResetRoundState();
+        if (CheatToggles.logGameState) ConsoleUI.Log($"Game ended with reason {endGameResult.GameOverReason}");
     }
 }

@@ -80,7 +80,7 @@ public static class ChatController_Update
 
         if (CheatToggles.longerMessages)
 		{
-			// Increasing the maximum length by 20 characters still avoids anticheat kicks
+			// Increasing the maximum length by 20 characters still avoids game kicks
             __instance.freeChatField.textArea.characterLimit = 120;
         }
 		else
@@ -100,7 +100,7 @@ public static class ChatController_SendChat
 
 		if (__instance.timeSinceLastMessage == 0f)
 		{
-			// Decreasing rate limit by 1 sec max still avoids anticheat kicks
+			// Decreasing rate limit by 1 sec max still avoids game kicks
 			__instance.timeSinceLastMessage += 1f;
 		}
     }

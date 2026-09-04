@@ -17,12 +17,10 @@ public static class TenkaiCheats
     private static bool _isInvisibleActive;
     private static float _levelFarmTimer;
     private static float _autoKillTimer;
+    private static float _ventTeleportTimer;
     private static Vector2 _invisibilityOriginalPosition;
+    private static readonly Dictionary<byte, ushort> _ventTeleportSequenceIds = new();
 
-    private static readonly Dictionary<byte, ushort> _ventSeqIds = new Dictionary<byte, ushort>();
-    private static float _spamTpImpsTimer = -999f;
-    private static float _spamTpAllTimer = -999f;
-    private static float _destroyInGameTimer = -999f;
     private static bool _doorHallucinationSent;
 
 
@@ -30,13 +28,11 @@ public static class TenkaiCheats
     {
         if (!CheatToggles.closeMeeting) return;
 
-        if (Utils.isMeeting) // Closes MeetingHud window if it's open
+        if (Utils.isMeeting)
         {
-            // Destroy MeetingHud window gameobject
             MeetingHud.Instance.DespawnOnDestroy = false;
             UnityEngine.Object.Destroy(MeetingHud.Instance.gameObject);
 
-            // Gameplay must be reenabled
             DestroyableSingleton<HudManager>.Instance.StartCoroutine(DestroyableSingleton<HudManager>.Instance.CoFadeFullScreen(Color.black, Color.clear, 0.2f, false));
             PlayerControl.LocalPlayer.SetKillTimer(GameManager.Instance.LogicOptions.GetKillCooldown());
             ShipStatus.Instance.EmergencyCooldown = GameManager.Instance.LogicOptions.GetEmergencyCooldown();
@@ -44,7 +40,7 @@ public static class TenkaiCheats
             DestroyableSingleton<HudManager>.Instance.SetHudActive(true);
             ControllerManager.Instance.CloseAndResetAll();
         }
-        else if (ExileController.Instance) // Ends exile cutscene if it's playing
+        else if (ExileController.Instance)
         {
             ExileController.Instance.ReEnableGameplay();
             ExileController.Instance.WrapUp();
@@ -131,15 +127,11 @@ public static class TenkaiCheats
             engineerRole.inVentTimeRemaining = engineerRole.GetCooldown();
         }
 
-        if (CheatToggles.noVentCooldown)
+        if (CheatToggles.noVentCooldown && engineerRole.cooldownSecondsRemaining > 0f)
         {
-            if (engineerRole.cooldownSecondsRemaining > 0f)
-            {
-                engineerRole.cooldownSecondsRemaining = 0f;
-
-                DestroyableSingleton<HudManager>.Instance.AbilityButton.ResetCoolDown();
-                DestroyableSingleton<HudManager>.Instance.AbilityButton.SetCooldownFill(0f);
-            }
+            engineerRole.cooldownSecondsRemaining = 0f;
+            DestroyableSingleton<HudManager>.Instance.AbilityButton.ResetCoolDown();
+            DestroyableSingleton<HudManager>.Instance.AbilityButton.SetCooldownFill(0f);
         }
     }
 
@@ -232,6 +224,191 @@ public static class TenkaiCheats
         CheatToggles.kickVents = false;
     }
 
+    public static void TeleportEveryoneToVent(int ventIndex)
+    {
+        if (ShipStatus.Instance?.AllVents == null) return;
+        if (ventIndex < 0 || ventIndex >= ShipStatus.Instance.AllVents.Count) return;
+
+        int ventId = ShipStatus.Instance.AllVents[ventIndex].Id;
+        foreach (PlayerControl player in PlayerControl.AllPlayerControls)
+        {
+            if (player == null || player == PlayerControl.LocalPlayer || player.MyPhysics == null) continue;
+            SendBootFromVent(player, ventId);
+        }
+    }
+
+    private static void SendBootFromVent(PlayerControl player, int ventId, int targetClientId = -1)
+    {
+        if (Utils.isHost && targetClientId < 0)
+        {
+            player.MyPhysics.RpcBootFromVent(ventId);
+            return;
+        }
+
+        if (AmongUsClient.Instance == null || ShipStatus.Instance == null) return;
+
+        if (!_ventTeleportSequenceIds.TryGetValue(player.PlayerId, out ushort sequenceId))
+            sequenceId = 6767;
+
+        MessageWriter enterWriter = MessageWriter.Get(SendOption.Reliable);
+        enterWriter.Write(++sequenceId);
+        enterWriter.Write((byte)VentilationSystem.Operation.Enter);
+        enterWriter.Write((byte)ventId);
+
+        MessageWriter bootWriter = MessageWriter.Get(SendOption.Reliable);
+        bootWriter.Write(++sequenceId);
+        bootWriter.Write((byte)VentilationSystem.Operation.BootImpostors);
+        bootWriter.Write((byte)ventId);
+
+        MessageWriter message = MessageWriter.Get(SendOption.Reliable);
+        message.StartMessage(Tags.GameDataTo);
+        message.Write(AmongUsClient.Instance.GameId);
+        message.WritePacked(targetClientId >= 0 ? targetClientId : AmongUsClient.Instance.HostId);
+
+        WriteVentUpdate(message, player, enterWriter);
+        WriteVentUpdate(message, player, bootWriter);
+
+        message.EndMessage();
+        AmongUsClient.Instance.SendOrDisconnect(message);
+        message.Recycle();
+        enterWriter.Recycle();
+        bootWriter.Recycle();
+        _ventTeleportSequenceIds[player.PlayerId] = sequenceId;
+    }
+
+    public static void ErrorBan(PlayerControl target)
+    {
+        if (!Utils.isInGame)
+        {
+            NotifyBanUnavailable("Error Ban");
+            return;
+        }
+
+        if (AmongUsClient.Instance == null || target == null || target == PlayerControl.LocalPlayer || target.OwnerId == AmongUsClient.Instance.HostId) return;
+
+        PlayerControl hostPlayer = null;
+        foreach (PlayerControl player in PlayerControl.AllPlayerControls)
+        {
+            if (player != null && player.OwnerId == AmongUsClient.Instance.HostId)
+            {
+                hostPlayer = player;
+                break;
+            }
+        }
+
+        if (hostPlayer?.MyPhysics == null) return;
+        SendBootFromVent(hostPlayer, 1, target.OwnerId);
+    }
+
+    public static void MassBanImps()
+    {
+        if (!Utils.isInGame)
+        {
+            NotifyBanUnavailable("Mass Ban Imps");
+            return;
+        }
+
+        foreach (PlayerControl player in PlayerControl.AllPlayerControls)
+        {
+            if (player?.Data == null || !RoleManager.IsImpostorRole(player.Data.RoleType)) continue;
+            ErrorBan(player);
+        }
+    }
+
+    public static void MassBanCrewmates()
+    {
+        if (!Utils.isInGame)
+        {
+            NotifyBanUnavailable("Mass Ban Crewmate");
+            return;
+        }
+
+        foreach (PlayerControl player in PlayerControl.AllPlayerControls)
+        {
+            if (player?.Data == null || RoleManager.IsImpostorRole(player.Data.RoleType)) continue;
+            ErrorBan(player);
+        }
+    }
+
+    public static void ToggleDestroySelectedPlayer(PlayerControl target)
+    {
+        if (target == null) return;
+
+        if (CheatToggles.destroySelectedPlayer && CheatToggles.destroySelectedPlayerId == target.PlayerId)
+        {
+            CheatToggles.destroySelectedPlayer = false;
+            CheatToggles.destroySelectedPlayerId = -1;
+        }
+        else
+        {
+            CheatToggles.destroySelectedPlayer = true;
+            CheatToggles.destroySelectedPlayerId = target.PlayerId;
+        }
+    }
+
+    public static void MassBanAll()
+    {
+        if (!Utils.isInGame)
+        {
+            NotifyBanUnavailable("Mass Ban All");
+            return;
+        }
+
+        if (AmongUsClient.Instance == null) return;
+
+        foreach (PlayerControl player in PlayerControl.AllPlayerControls)
+        {
+            if (player == null || player == PlayerControl.LocalPlayer || player.OwnerId == AmongUsClient.Instance.HostId) continue;
+            ErrorBan(player);
+        }
+    }
+
+    private static void NotifyBanUnavailable(string featureName)
+    {
+        HudManager.Instance?.Notifier?.AddDisconnectMessage(
+            $"<color=#fff><b><color=#c40033>TenkaiMenu</color></b> <color=#ffff00>{featureName}</color> failed. The game needs to be started.</color>");
+    }
+
+    private static void WriteVentUpdate(MessageWriter message, PlayerControl player, MessageWriter operation)
+    {
+        message.StartMessage((byte)GameDataTypes.RpcFlag);
+        message.WritePacked(ShipStatus.Instance.NetId);
+        message.Write((byte)RpcCalls.UpdateSystem);
+        message.Write((byte)SystemTypes.Ventilation);
+        message.WriteNetObject(player);
+        message.Write(operation, false);
+        message.EndMessage();
+    }
+
+    public static void ProcessVentTeleportCheats()
+    {
+        if ((!CheatToggles.spamVentTPAll && !CheatToggles.spamVentTPRandom && !CheatToggles.spamVentTPImps && !CheatToggles.destroySelectedPlayer) || ShipStatus.Instance?.AllVents == null) return;
+        if (Time.time < _ventTeleportTimer) return;
+
+        var allVents = ShipStatus.Instance.AllVents;
+        if (allVents.Count == 0) return;
+
+        foreach (PlayerControl player in PlayerControl.AllPlayerControls)
+        {
+            if (player == null || player == PlayerControl.LocalPlayer || player.MyPhysics == null) continue;
+
+            bool isImpostor = player.Data != null && RoleManager.IsImpostorRole(player.Data.RoleType);
+            bool isSelectedDestroyTarget = player.PlayerId == CheatToggles.destroySelectedPlayerId;
+            if (CheatToggles.destroySelectedPlayer && !isSelectedDestroyTarget) continue;
+            if (!CheatToggles.destroySelectedPlayer && CheatToggles.spamVentTPImps && !isImpostor) continue;
+            if (!CheatToggles.destroySelectedPlayer && !CheatToggles.spamVentTPImps && !CheatToggles.spamVentTPAll && !CheatToggles.spamVentTPRandom) continue;
+
+            int ventIndex = CheatToggles.spamVentTPRandom
+                ? UnityEngine.Random.Range(0, allVents.Count)
+                : Mathf.Clamp(CheatToggles.ventTPAllVentIdx, 0, allVents.Count - 1);
+            if (CheatToggles.spamVentTPImps || CheatToggles.destroySelectedPlayer)
+                ventIndex = UnityEngine.Random.Range(0, allVents.Count);
+                SendBootFromVent(player, allVents[ventIndex].Id);
+        }
+
+        _ventTeleportTimer = Time.time + 0.75f;
+    }
+
     public static void DoorHallucinationAllCheat()
     {
         if (!CheatToggles.doorHallucinationAll)
@@ -254,231 +431,6 @@ public static class TenkaiCheats
             if (target == null || target.AmOwner || target.Data == null || target.Data.Disconnected) continue;
             DoorHallucination(target);
         }
-    }
-
-    // --- VENT TELEPORT FEATURES ---
-
-    public static void TeleportAllToVent()
-    {
-        if (ShipStatus.Instance == null || Utils.isLobby) return;
-
-        var vents = ShipStatus.Instance.AllVents;
-        if (vents == null || vents.Count == 0) return;
-
-        Vent targetVent = null;
-        foreach (var vent in vents)
-        {
-            if (vent != null)
-            {
-                targetVent = vent;
-                break;
-            }
-        }
-
-        if (targetVent == null) return;
-
-        foreach (PlayerControl player in PlayerControl.AllPlayerControls)
-        {
-            if (player == null || player.AmOwner || player.Data == null || player.Data.Disconnected || player.Data.IsDead) continue;
-            VentTP(player, targetVent.Id);
-        }
-    }
-
-    public static void SpamTpImpsCheat()
-    {
-        if (!CheatToggles.spamTpImps) return;
-        if (ShipStatus.Instance == null || Utils.isLobby) return;
-        if (Time.realtimeSinceStartup - _spamTpImpsTimer < 1f) return;
-
-        _spamTpImpsTimer = Time.realtimeSinceStartup;
-
-        var vents = ShipStatus.Instance.AllVents;
-        if (vents == null || vents.Count == 0) return;
-
-        List<PlayerControl> impostors = new List<PlayerControl>();
-        foreach (PlayerControl player in PlayerControl.AllPlayerControls)
-        {
-            if (player == null || player.AmOwner || player.Data == null || player.Data.Disconnected || player.Data.IsDead) continue;
-            if (player.Data.Role != null && player.Data.Role.IsImpostor)
-            {
-                impostors.Add(player);
-            }
-        }
-
-        if (impostors.Count == 0) return;
-
-        List<Vent> shuffledVents = new List<Vent>(vents);
-        for (int i = shuffledVents.Count - 1; i > 0; i--)
-        {
-            int j = UnityEngine.Random.Range(0, i + 1);
-            Vent temp = shuffledVents[i];
-            shuffledVents[i] = shuffledVents[j];
-            shuffledVents[j] = temp;
-        }
-
-        int count = Mathf.Min(impostors.Count, shuffledVents.Count);
-        for (int i = 0; i < count; i++)
-        {
-            Vent targetVent = shuffledVents[i];
-            if (targetVent == null) continue;
-            VentTP(impostors[i], targetVent.Id);
-        }
-    }
-
-    public static void SpamTpAllCheat()
-    {
-        if (!CheatToggles.spamTpAll) return;
-        if (ShipStatus.Instance == null || Utils.isLobby) return;
-        if (Time.realtimeSinceStartup - _spamTpAllTimer < 2f) return;
-
-        _spamTpAllTimer = Time.realtimeSinceStartup;
-
-        var vents = ShipStatus.Instance.AllVents;
-        if (vents == null || vents.Count == 0) return;
-
-        List<PlayerControl> players = new List<PlayerControl>();
-        foreach (PlayerControl player in PlayerControl.AllPlayerControls)
-        {
-            if (player == null || player.AmOwner || player.Data == null || player.Data.Disconnected || player.Data.IsDead) continue;
-            players.Add(player);
-        }
-
-        if (players.Count == 0) return;
-
-        List<Vent> shuffledVents = new List<Vent>(vents);
-        for (int i = shuffledVents.Count - 1; i > 0; i--)
-        {
-            int j = UnityEngine.Random.Range(0, i + 1);
-            Vent temp = shuffledVents[i];
-            shuffledVents[i] = shuffledVents[j];
-            shuffledVents[j] = temp;
-        }
-
-        int count = Mathf.Min(players.Count, shuffledVents.Count);
-        for (int i = 0; i < count; i++)
-        {
-            Vent targetVent = shuffledVents[i];
-            if (targetVent == null) continue;
-            VentTP(players[i], targetVent.Id);
-        }
-    }
-
-    public static void DestroyInGameCheat()
-    {
-        if (!CheatToggles.destroyInGame || CheatToggles.destroyInGamePlayerId < 0) return;
-        if (ShipStatus.Instance == null || Utils.isLobby) return;
-        if (Time.realtimeSinceStartup - _destroyInGameTimer < 0.5f) return;
-
-        _destroyInGameTimer = Time.realtimeSinceStartup;
-
-        var vents = ShipStatus.Instance.AllVents;
-        if (vents == null || vents.Count == 0) return;
-
-        PlayerControl target = null;
-        foreach (PlayerControl player in PlayerControl.AllPlayerControls)
-        {
-            if (player == null || player.AmOwner || player.Data == null || player.Data.Disconnected || player.Data.IsDead) continue;
-            if (player.PlayerId == CheatToggles.destroyInGamePlayerId)
-            {
-                target = player;
-                break;
-            }
-        }
-
-        if (target == null)
-        {
-            CheatToggles.destroyInGame = false;
-            CheatToggles.destroyInGamePlayerId = -1;
-            return;
-        }
-
-        List<Vent> shuffledVents = new List<Vent>(vents);
-        for (int i = shuffledVents.Count - 1; i > 0; i--)
-        {
-            int j = UnityEngine.Random.Range(0, i + 1);
-            Vent temp = shuffledVents[i];
-            shuffledVents[i] = shuffledVents[j];
-            shuffledVents[j] = temp;
-        }
-
-        Vent randomVent = shuffledVents[0];
-        if (randomVent != null)
-        {
-            VentTP(target, randomVent.Id);
-        }
-    }
-
-    private static void SendVentPair(AmongUsClient client, PlayerControl target, int ventId, int toClientId, ushort seqId)
-    {
-        byte seqLo = (byte)(seqId & 255);
-        byte seqHi = (byte)(seqId >> 8);
-        ushort num = (ushort)(seqId + 1);
-        byte seq2Lo = (byte)(num & 255);
-        byte seq2Hi = (byte)(num >> 8);
-        SendUpdateSystemToClient(client, (SystemTypes)37, target.NetId, new byte[]
-        {
-            seqLo,
-            seqHi,
-            2,
-            (byte)(ventId & 255)
-        }, toClientId);
-        SendUpdateSystemToClient(client, (SystemTypes)37, target.NetId, new byte[]
-        {
-            seq2Lo,
-            seq2Hi,
-            5,
-            (byte)(ventId & 255)
-        }, toClientId);
-    }
-
-    private static void SendUpdateSystemToClient(AmongUsClient client, SystemTypes systemType, uint senderNetId, byte[] extraBytes, int targetClientId)
-    {
-        MessageWriter writer = client.StartRpcImmediately(ShipStatus.Instance.NetId, 35, SendOption.Reliable, targetClientId);
-        writer.Write((byte)systemType);
-        writer.WritePacked(senderNetId);
-        foreach (byte value in extraBytes)
-        {
-            writer.Write(value);
-        }
-        client.FinishRpcImmediately(writer);
-    }
-
-    public static void VentTP(PlayerControl target, int ventId)
-    {
-        if (target == null || target.AmOwner || target.Data == null)
-        {
-            return;
-        }
-
-        AmongUsClient client = AmongUsClient.Instance;
-        if (client == null || !client.AmConnected || ShipStatus.Instance == null)
-        {
-            return;
-        }
-
-        if (client.AmHost)
-        {
-            try
-            {
-                PlayerPhysics myPhysics = target.MyPhysics;
-                myPhysics?.RpcBootFromVent(ventId);
-            }
-            catch
-            {
-            }
-            return;
-        }
-
-        byte pid = target.Data.PlayerId;
-        ushort seqId;
-        if (!_ventSeqIds.TryGetValue(pid, out seqId))
-        {
-            seqId = 1000;
-        }
-
-        int hostId = client.HostId;
-        SendVentPair(client, target, ventId, hostId, seqId);
-        _ventSeqIds[pid] = (ushort)(seqId + 2);
     }
 
     // --- OTHER CHEATS ---
@@ -687,9 +639,10 @@ public static class TenkaiCheats
         {
             foreach (var player in PlayerControl.AllPlayerControls)
             {
+                if (player == null || player == PlayerControl.LocalPlayer || player.Data == null || player.Data.Role.TeamType != RoleTeamTypes.Crewmate) continue;
                 Utils.MurderPlayer(player, MurderResultFlags.Succeeded);
             }
-            _levelFarmTimer = 1f;
+            _levelFarmTimer = Mathf.Clamp(CheatToggles.levelFarmCooldownMs, 10f, 200f) / 1000f;
         }
     }
 

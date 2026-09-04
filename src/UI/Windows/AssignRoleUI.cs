@@ -9,6 +9,7 @@ public class AssignRoleUI : MonoBehaviour
 {
     public static int windowHeight = 500;
     public static int windowWidth = 700;
+    public static Rect windowRect;
 
     private Rect _windowRect;
     private Vector2 _scrollPosition = Vector2.zero;
@@ -33,6 +34,7 @@ public class AssignRoleUI : MonoBehaviour
 
         UIHelpers.ApplyUIColor();
         _windowRect = GUI.Window((int)WindowId.AssignRoleUI, _windowRect, (GUI.WindowFunction)AssignRoleWindow, "Assign Roles");
+        windowRect = _windowRect;
     }
 
     private void AssignRoleWindow(int windowID)

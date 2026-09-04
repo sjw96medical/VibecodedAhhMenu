@@ -366,3 +366,98 @@ public static class PlayerPurchasesData_GetPurchase
         __result = true;
     }
 }
+
+[HarmonyPatch(typeof(MatchInfoHudButton), nameof(MatchInfoHudButton.Update))]
+public static class MatchInfoHudButton_Update
+{
+    public static bool Prefix(MatchInfoHudButton __instance)
+    {
+        if (!CheatToggles.enableChat) return true;
+
+        __instance.aspectPosition.DistanceFromEdge = MatchInfoHudButton.adjustedDistanceFromEdge;
+        return false;
+    }
+}
+
+[HarmonyPatch]
+public static class PassiveUiElement_Patches
+{
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(PassiveButton), nameof(PassiveButton.ReceiveClickDown))]
+    [HarmonyPatch(typeof(PassiveButton), nameof(PassiveButton.ReceiveClickUp))]
+    [HarmonyPatch(typeof(PassiveButton), nameof(PassiveButton.ReceiveMouseOver))]
+    [HarmonyPatch(typeof(GameOptionButton), nameof(GameOptionButton.ReceiveClickDown))]
+    [HarmonyPatch(typeof(GameOptionButton), nameof(GameOptionButton.ReceiveClickUp))]
+    [HarmonyPatch(typeof(GameOptionButton), nameof(GameOptionButton.ReceiveMouseOver))]
+    [HarmonyPatch(typeof(SlideBar), nameof(SlideBar.ReceiveClickDrag))]
+    [HarmonyPatch(typeof(Scrollbar), nameof(Scrollbar.ReceiveClickDrag))]
+    [HarmonyPatch(typeof(Scroller), nameof(Scroller.UpdateScrollBars))]
+    public static bool Prefix()
+    {
+        if (TenkaiMenu.menuAllowClickThrough.Value) return true;
+
+        var mousePosition = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+        return !((MenuUI.isGUIActive && MenuUI.currentWindowRect.Contains(mousePosition)) ||
+                 (CheatToggles.showConsole && ConsoleUI.windowRect.Contains(mousePosition)) ||
+                 (CheatToggles.showDoorsMenu && DoorsUI.windowRect.Contains(mousePosition)) ||
+                 (CheatToggles.showProtectMenu && ProtectUI.windowRect.Contains(mousePosition)) ||
+                 (CheatToggles.showAssignRoleMenu && AssignRoleUI.windowRect.Contains(mousePosition)) ||
+                 (CheatToggles.showTasksMenu && TasksUI.windowRect.Contains(mousePosition)));
+    }
+}
+
+[HarmonyPatch(typeof(PlayerControl), nameof(PlayerControl.CompleteTask))]
+public static class PlayerControl_CompleteTask
+{
+    public static bool Prefix(PlayerControl __instance, uint idx)
+    {
+        if (!AmongUsClient.Instance.AmHost || (!CheatToggles.unlockTasksAsImpostor && !CheatToggles.unlockVisualTasks)) return true;
+
+        var tasks = __instance.Data?.Tasks;
+        if (tasks != null)
+        {
+            foreach (var task in tasks)
+            {
+                if (task.Id == idx) return true;
+            }
+        }
+
+        if (__instance.myTasks == null) return true;
+
+        foreach (var task in __instance.myTasks)
+        {
+            if (task.Id != idx || task.IsComplete) continue;
+
+            try { task.Complete(); } catch { }
+            try { GameManager.Instance.CheckTaskCompletion(); } catch { }
+            return false;
+        }
+
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(Console), nameof(Console.CanUse))]
+public static class Console_CanUse
+{
+    public static void Prefix(Console __instance)
+    {
+        if ((CheatToggles.unlockTasksAsImpostor || (CheatToggles.unlockVisualTasks && TaskCheats.IsAllowedVisualTaskConsole(__instance))) && PlayerControl.LocalPlayer?.myTasks != null)
+        {
+            __instance.AllowImpostor = true;
+        }
+    }
+
+    public static void Postfix(Console __instance, ref float __result, ref bool canUse, ref bool couldUse)
+    {
+        if (!CheatToggles.unlockVisualTasks || PlayerControl.LocalPlayer == null || !TaskCheats.IsAllowedVisualTaskConsole(__instance)) return;
+
+        float distance = Vector2.Distance(PlayerControl.LocalPlayer.GetTruePosition(), __instance.transform.position);
+        if (distance <= __instance.UsableDistance)
+        {
+            canUse = true;
+            couldUse = true;
+            __result = distance;
+        }
+    }
+}

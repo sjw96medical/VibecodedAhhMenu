@@ -61,6 +61,8 @@ public class RolesTab : ITab
 
         CheatToggles.killReach = DrawPillToggle(CheatToggles.killReach, "Kill Reach");
 
+        CheatToggles.unlockTasksAsImpostor = DrawPillToggle(CheatToggles.unlockTasksAsImpostor, "Unlock Tasks as Imposter");
+
         CheatToggles.killOtherImpostors = DrawPillToggle(CheatToggles.killOtherImpostors, "Kill Other Impostors");
     }
 

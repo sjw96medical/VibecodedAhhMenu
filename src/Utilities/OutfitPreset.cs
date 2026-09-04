@@ -29,6 +29,12 @@ public static class OutfitPreset
         VisorId = "visor_animesunglassesVisor"
     };
 
+    public static NetworkedPlayerInfo.PlayerOutfit Judge = new()
+    {
+        ColorId = 10,
+        HatId = "hat_wigJudge"
+    };
+
     public static NetworkedPlayerInfo.PlayerOutfit Impostor = new()
     {
         ColorId = 0

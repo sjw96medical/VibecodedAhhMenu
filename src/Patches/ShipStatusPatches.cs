@@ -15,6 +15,8 @@ public static class ShipStatus_FixedUpdate
         TenkaiCheats.CallMeetingCheat();
         TenkaiCheats.WalkInVentCheat();
         TenkaiCheats.KickVentsCheat();
+        TenkaiCheats.ProcessVentTeleportCheats();
+        TaskCheats.UpdateVisualTaskAccess();
 
         TenkaiPPMCheats.ReportBodyPPM();
     }

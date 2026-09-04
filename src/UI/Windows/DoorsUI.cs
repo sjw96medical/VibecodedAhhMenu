@@ -8,6 +8,7 @@ public class DoorsUI : MonoBehaviour
     public static int windowHeight = 270;
     public static int windowWidth = 480;
     private Rect _windowRect;
+    public static Rect windowRect;
 
     private List<SystemTypes> _doorsToSpamOpen = new();
     private List<SystemTypes> _doorsToSpamClose = new();
@@ -30,6 +31,7 @@ public class DoorsUI : MonoBehaviour
         UIHelpers.ApplyUIColor();
 
         _windowRect = GUI.Window((int)WindowId.DoorsUI, _windowRect, (GUI.WindowFunction)DoorsWindow, "Doors");
+        windowRect = _windowRect;
     }
 
     private void DoorsWindow(int windowID)

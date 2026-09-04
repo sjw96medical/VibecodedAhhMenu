@@ -90,7 +90,7 @@ public static class TextBoxTMP_IsCharAllowed
 
         if (CheatToggles.unlockCharacters)
         {
-            // Blocked characters to avoid breaking text input / getting kicked by anticheat
+            // Blocked characters to avoid breaking text input or getting kicked by the game
             HashSet<char> blockedSymbols = new() { '\b', '\r', '>', '<', '[' };
 
             if (blockedSymbols.Contains(currentChar))

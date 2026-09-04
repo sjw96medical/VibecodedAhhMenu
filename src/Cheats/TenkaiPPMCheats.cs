@@ -448,6 +448,11 @@ public static class TenkaiPPMCheats
                     playerDataList.Add(PlayerPickMenu.CustomPPMChoice("Viper", OutfitPreset.Viper, Utils.GetBehaviourByRoleType(RoleTypes.Viper)));
                 }
 
+                if (_oldRole == RoleTypes.Judge || Utils.isFreePlay)
+                {
+                    playerDataList.Add(PlayerPickMenu.CustomPPMChoice("Judge", OutfitPreset.Judge, Utils.GetBehaviourByRoleType(RoleTypes.Judge)));
+                }
+
                 // Impostor role can only be used if it was already assigned at the start of the game or as host
                 if ((_oldRole != null && Utils.GetBehaviourByRoleType((RoleTypes)_oldRole).TeamType == RoleTeamTypes.Impostor) || Utils.isFreePlay || Utils.isHost)
                 {

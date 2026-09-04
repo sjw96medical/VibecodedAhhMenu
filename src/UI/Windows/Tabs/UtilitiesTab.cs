@@ -39,6 +39,8 @@ public class UtilitiesTab : ITab
         CheatToggles.copyLobbyCodeOnDisconnect = DrawPillToggle(CheatToggles.copyLobbyCodeOnDisconnect, "Copy Lobby Code on Disconnect");
         CheatToggles.showLobbyTimer = DrawPillToggle(CheatToggles.showLobbyTimer, "Show Lobby Timer");
 
+        CheatToggles.extendedLobbyList = DrawPillToggle(CheatToggles.extendedLobbyList, "Extended Lobby List");
+
         CheatToggles.spoofAprilFoolsDate = DrawPillToggle(CheatToggles.spoofAprilFoolsDate, "Spoof Date to April 1st");
     }
 

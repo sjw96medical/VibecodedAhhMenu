@@ -29,7 +29,7 @@ public partial class TenkaiMenu : BasePlugin
     public static AssignRoleUI assignRoleUI;
     public static KeybindListener keybindListener;
 
-    public static string TenkaiVersion = "1.0.4";
+    public static string TenkaiVersion = "2.0.0";
     public static List<string> supportedAU = new List<string> { "2026.8.18" };
     public static bool isPanicked = false;
     public static bool inStealthMode = false;
@@ -41,6 +41,7 @@ public partial class TenkaiMenu : BasePlugin
     public static ConfigEntry<float> menuFontSize;
     public static ConfigEntry<bool> menuOpenOnMouse;
     public static ConfigEntry<bool> menuKeepSubwindowsOpen;
+    public static ConfigEntry<bool> menuAllowClickThrough;
     public static ConfigEntry<string> spoofLevel;
     public static ConfigEntry<string> spoofPlatform;
     public static ConfigEntry<bool> spoofDeviceId;
@@ -91,6 +92,11 @@ public partial class TenkaiMenu : BasePlugin
                                 false,
                                 "When enabled, closing the TenkaiMenu GUI will not automatically close its subwindows");
 
+        menuAllowClickThrough = Config.Bind("TenkaiMenu.GUI",
+                    "AllowClicksThrough",
+                    true,
+                    "When enabled, clicks pass through the TenkaiMenu GUI, letting you interact with Among Us GUI elements behind it");
+
         autoLoadProfile = Config.Bind("TenkaiMenu.Profile",
                                 "AutoLoadProfile",
                                 false,
@@ -137,6 +143,8 @@ public partial class TenkaiMenu : BasePlugin
         CheatToggles.unlockFeatures = true;
         CheatToggles.freeCosmetics = true;
         CheatToggles.avoidPenalties = true;
+
+        Anticheat.Initialize();
 
         Harmony.PatchAll();
 

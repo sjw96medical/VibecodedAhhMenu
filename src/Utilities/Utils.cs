@@ -651,7 +651,7 @@ public static class Utils
 
     // Gets the appropriate nametag for a player
     // Gets the appropriate nametag for a player
-    public static string GetNameTag(NetworkedPlayerInfo playerInfo, string playerName, bool isChat = false)
+    public static string GetNameTag(NetworkedPlayerInfo playerInfo, string playerName, bool isChat = false, bool isMatchInfo = false)
     {
         var nameTag = playerName;
 
@@ -700,6 +700,21 @@ public static class Utils
         bool shouldBeRed = (isImpostorTeam && isLocalPlayerImpostor) || (CheatToggles.seeRoles && isImpostorTeam);
         
         var finalName = shouldBeRed ? $"<color=#ff0000>{playerName}</color>" : $"<color=#ffffff>{playerName}</color>";
+
+        if (isMatchInfo)
+        {
+            if (CheatToggles.seeRoles)
+            {
+                var coloredRole = $"<color=#{roleColor}>{GetRoleName(playerInfo)}</color>";
+                return CheatToggles.seePlayerInfo
+                    ? $"<size=70%><color=#ff00ff>{platform} - Lv:{level}{hostString}</color></size>\r\n{finalName} <size=70%>{coloredRole}</size>"
+                    : $"{finalName} <size=70%>{coloredRole}</size>";
+            }
+
+            return CheatToggles.seePlayerInfo
+                ? $"<size=70%><color=#ff00ff>{platform} - Lv:{level}{hostString}</color></size>\r\n{finalName}"
+                : finalName;
+        }
 
         if (CheatToggles.seeRoles)
         {
