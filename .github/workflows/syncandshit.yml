@@ -19,7 +19,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote add upstream https://github.com/ORIGINAL_OWNER/ORIGINAL_REPO.git
+          git remote add upstream https://github.com/fugodev/TenkaiMenu.git
           git fetch upstream main
           git merge upstream/main --no-edit
           git push origin main
