@@ -55,10 +55,16 @@ jobs:
         if: steps.sync.outputs.new != '0' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.SYNC_PAT }}
+          GH_REPO: ${{ github.repository }}
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
 
           gh release delete latest --cleanup-tag --yes || true
+
+          gh release create latest ./build_output/* \
+            --title "latest ($SHORT_SHA)" \
+            --notes "Automated build from commit $SHORT_SHA" \
+            --target main
 
           gh release create latest ./build_output/* \
             --title "latest ($SHORT_SHA)" \
