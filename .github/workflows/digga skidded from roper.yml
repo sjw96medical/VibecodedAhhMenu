@@ -51,7 +51,7 @@ jobs:
           dotnet restore
           dotnet build -c Release --no-restore --output ./build_output
 
-      - name: Publish release
+            - name: Publish release
         if: steps.sync.outputs.new != '0' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.SYNC_PAT }}
@@ -59,14 +59,13 @@ jobs:
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
 
-          gh release delete latest --cleanup-tag --yes || true
+          if gh release view latest > /dev/null 2>&1; then
+            gh release delete latest --cleanup-tag --yes
+          fi
 
           gh release create latest ./build_output/* \
             --title "latest ($SHORT_SHA)" \
             --notes "Automated build from commit $SHORT_SHA" \
             --target main
-
-          gh release create latest ./build_output/* \
-            --title "latest ($SHORT_SHA)" \
             --notes "Automated build from commit $SHORT_SHA" \
             --target main
