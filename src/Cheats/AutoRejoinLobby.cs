@@ -1,6 +1,7 @@
 using System.Collections;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
+using BepInEx.Unity.IL2CPP.Utils.Collections;
 using BepInEx.Configuration;
 using HarmonyLib;
 using InnerNet;
@@ -81,7 +82,7 @@ namespace AutoRejoin
         private static IEnumerator RejoinRoutine(AmongUsClient client, int gameId)
         {
             yield return new WaitForSeconds(AutoRejoinPlugin.RejoinDelay.Value);
-            yield return client.CoJoinOnlineGameFromCode(gameId);
+            client.StartCoroutine(client.CoJoinOnlineGameFromCode(gameId));
         }
     }
 }
