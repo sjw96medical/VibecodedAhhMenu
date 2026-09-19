@@ -51,59 +51,6 @@ jobs:
           dotnet restore
           dotnet build -c Release --no-restore --output ./build_output
 
-       name: Sync and Build
-
-on:
-  schedule:
-    - cron: '*/15 * * * *'
-  workflow_dispatch:
-
-concurrency:
-  group: sync-and-build
-  cancel-in-progress: false
-
-jobs:
-  sync-and-build:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.SYNC_PAT }}
-          fetch-depth: 0
-
-      - name: Sync upstream
-        id: sync
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git remote add upstream https://github.com/fugodev/TenkaiMenu.git
-          git fetch upstream main
-
-          NEW=$(git rev-list --count HEAD..upstream/main)
-          echo "new=$NEW" >> "$GITHUB_OUTPUT"
-
-          if [ "$NEW" -gt 0 ]; then
-            git merge upstream/main --no-edit
-            git push origin main
-          fi
-
-      - name: Setup .NET
-        if: steps.sync.outputs.new != '0' || github.event_name == 'workflow_dispatch'
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '6.0.x'
-
-      - name: Build
-        if: steps.sync.outputs.new != '0' || github.event_name == 'workflow_dispatch'
-        run: |
-          dotnet restore
-          dotnet build -c Release --no-restore --output ./build_output
-
       - name: Publish release
         if: steps.sync.outputs.new != '0' || github.event_name == 'workflow_dispatch'
         env:
@@ -119,5 +66,4 @@ jobs:
           gh release create latest ./build_output/* \
             --title "latest ($SHORT_SHA)" \
             --notes "Automated build from commit $SHORT_SHA" \
-            --target mainSHORT_SHA" \
             --target main
